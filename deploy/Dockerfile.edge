@@ -1,0 +1,16 @@
+# Builds the frontend static bundle and packages it with Caddy, which both serves it
+# and reverse-proxies API/admin/media traffic to the backend — one container handles
+# static hosting, TLS termination, and automatic Let's Encrypt certificates.
+
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ .
+# .env.production (VITE_API_URL=/api) makes the built bundle call the API on the same
+# origin, which Caddy then proxies below — no CORS needed in this deployment topology.
+RUN npm run build
+
+FROM caddy:2-alpine
+COPY --from=build /app/dist /srv
+COPY deploy/Caddyfile /etc/caddy/Caddyfile

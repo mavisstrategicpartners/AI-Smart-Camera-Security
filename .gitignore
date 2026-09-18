@@ -1,0 +1,16 @@
+.env
+.env*
+
+
+# Local database
+backend/data/
+
+# Build output
+backend/target/
+frontend/dist/
+
+# Runtime uploads
+backend/uploads/
+
+# JVM crash logs
+hs_err_pid*.log

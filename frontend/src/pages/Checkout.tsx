@@ -1,0 +1,177 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+import { submitOrder, initPayFastPayment, redirectToPayFast, fetchStoreInfo, type StoreInfo } from "../api/client";
+import { useCart } from "../api/CartContext";
+import { formatZAR } from "../components/ProductCard";
+
+const PROVINCES = [
+  "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
+  "Mpumalanga", "North West", "Northern Cape", "Western Cape",
+];
+
+const SHIPPING_FEE = 0; // flat free shipping for now — wire up real courier rates later
+
+export default function Checkout() {
+  const { cart, refresh } = useCart();
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [storeInfo, setStoreInfo] = useState<StoreInfo | null>(null);
+
+  useEffect(() => {
+    fetchStoreInfo().then(setStoreInfo).catch(() => {});
+  }, []);
+
+  const items = cart?.items ?? [];
+  const subtotal = parseFloat(String(cart?.total ?? "0"));
+  const total = subtotal + SHIPPING_FEE;
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!cart) return;
+    setSubmitting(true);
+    setError(null);
+
+    const form = new FormData(e.currentTarget);
+    try {
+      const order = await submitOrder({
+        cart_token: cart.token,
+        full_name: String(form.get("full_name")),
+        email: String(form.get("email")),
+        phone: String(form.get("phone")),
+        address_line1: String(form.get("address_line1")),
+        address_line2: String(form.get("address_line2") ?? ""),
+        city: String(form.get("city")),
+        province: String(form.get("province")),
+        postal_code: String(form.get("postal_code")),
+        shipping_fee: SHIPPING_FEE,
+      });
+      await refresh(); // backend cleared the cart; pull a fresh one
+
+      // Hand off to PayFast — this navigates the browser away, so nothing after this runs.
+      const payfastInit = await initPayFastPayment(order.reference);
+      redirectToPayFast(payfastInit);
+    } catch {
+      setError("We couldn't place that order. Check the fields and try again.");
+      setSubmitting(false);
+    }
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="mx-auto max-w-lg px-6 py-20 text-center">
+        <h1 className="mb-3 font-display text-2xl font-semibold">Your cart is empty</h1>
+        <p className="mb-6 text-sm text-muted">Add a camera before checking out.</p>
+        <Link to="/" className="bg-navydeep px-5 py-2.5 font-display text-sm text-paper">
+          Browse cameras
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto grid max-w-5xl gap-10 px-6 py-14 md:grid-cols-[1.3fr_1fr]">
+      <div>
+        <h1 className="mb-6 font-display text-2xl font-semibold">Delivery details</h1>
+        <form id="checkout-form" onSubmit={handleSubmit} className="grid gap-4">
+          <Field label="Full name" name="full_name" required />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Email" name="email" type="email" required />
+            <Field label="Phone" name="phone" type="tel" required />
+          </div>
+          <Field label="Address line 1" name="address_line1" required />
+          <Field label="Address line 2 (optional)" name="address_line2" />
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="City" name="city" required />
+            <div>
+              <label className="mb-1 block text-[13px] text-[#5C5545]">Province</label>
+              <select
+                name="province"
+                required
+                defaultValue=""
+                className="w-full border border-line bg-card px-3 py-2.5 text-sm"
+              >
+                <option value="" disabled>
+                  Select…
+                </option>
+                {PROVINCES.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Field label="Postal code" name="postal_code" required />
+          </div>
+
+          {error && <p className="text-sm text-red-700">{error}</p>}
+
+          <p className="mt-2 text-xs text-muted">
+            You'll be taken to PayFast to complete payment securely. We never see or store your card details.
+          </p>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="mt-2 justify-center bg-amber px-5 py-3 text-center font-display text-sm font-semibold text-navydeep transition-opacity hover:opacity-85 disabled:opacity-50"
+          >
+            {submitting ? "Redirecting to PayFast…" : `Pay with PayFast — ${formatZAR(total)}`}
+          </button>
+        </form>
+      </div>
+
+      <aside className="h-fit border border-line bg-card p-6">
+        <h2 className="mb-4 font-display text-lg font-semibold">Order summary</h2>
+        <div className="grid gap-3">
+          {items.map((item) => (
+            <div key={item.id} className="flex justify-between text-[13.5px]">
+              <span>
+                {item.product.name} × {item.quantity}
+              </span>
+              <span>{formatZAR(item.subtotal)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-between border-t border-line pt-3 text-[13.5px] text-muted">
+          <span>Shipping</span>
+          <span>{SHIPPING_FEE === 0 ? "Free" : formatZAR(SHIPPING_FEE)}</span>
+        </div>
+        <div className="mt-2 flex justify-between border-t border-line pt-3 font-display text-base font-semibold">
+          <span>Total</span>
+          <span>{formatZAR(total)}</span>
+        </div>
+        {storeInfo && (
+          <p className="mt-3 text-xs text-muted">
+            {storeInfo.prices_include_vat
+              ? `Prices include ${storeInfo.vat_rate_percent}% VAT.`
+              : `${storeInfo.vat_rate_percent}% VAT will be added.`}
+            {storeInfo.vat_number && ` VAT No: ${storeInfo.vat_number}.`}
+          </p>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  name,
+  type = "text",
+  required = false,
+}: {
+  label: string;
+  name: string;
+  type?: string;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[13px] text-[#5C5545]">{label}</label>
+      <input
+        name={name}
+        type={type}
+        required={required}
+        className="w-full border border-line bg-card px-3 py-2.5 text-sm"
+      />
+    </div>
+  );
+}

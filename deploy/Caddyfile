@@ -1,0 +1,31 @@
+# {$DOMAIN} is read from the DOMAIN environment variable at container startup (set in
+# docker-compose.yml / your .env). Caddy automatically obtains and renews a Let's
+# Encrypt certificate for it — no certbot, no manual renewal, as long as DNS for that
+# domain points at this server and ports 80+443 are reachable.
+{$DOMAIN} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+	handle /admin* {
+		reverse_proxy backend:8000
+	}
+	handle /media/* {
+		reverse_proxy backend:8000
+	}
+	handle /products/* {
+		reverse_proxy backend:8000
+	}
+	handle /h2-console* {
+		respond 404
+	}
+
+	# Everything else: the built React app, falling back to index.html so client-side
+	# routing (react-router) works on a hard refresh of e.g. /returns or /order/xyz.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
